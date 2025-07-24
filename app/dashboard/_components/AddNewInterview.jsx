@@ -1,3 +1,4 @@
+
 'use client'
 import React, { useState } from 'react'
 import {
@@ -7,28 +8,76 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { chatSession } from '@/utils/GeminiAIModal'
+import { LoaderCircle } from 'lucide-react'
+
+import { useUser } from '@clerk/nextjs'
+import moment from 'moment/moment'
+import { v4 as uuidv4 } from 'uuid';
+
+import { useRouter } from 'next/navigation'
+import Router from 'next/router'
+import { db } from '@/utils/db'
+
+import { uuid } from 'drizzle-orm/pg-core'
+import { MockInterview } from '@/utils/schema'
+
+
+
 
 function AddNewInterview() {
   const [openDialog, setOpenDialog] = useState(false)
-  const [jobRole, setJobRole] = useState('')
+  const [jobPosition, setJobPosition] = useState('')
   const [jobDesc, setJobDesc] = useState('')
   const [experience, setExperience] = useState('')
-  const [questions, setQuestions] = useState([])
+  
+  const route=useRouter
+  const[loading,setLoading]=useState(false);
+  const [jsonResponse, setJsonResponse] = useState([]);
+  const {user}=useUser();
+  
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async(e) => {
+    setLoading(true)
     e.preventDefault()
+    console.log(jobPosition, jobDesc, experience)
+
+    const InputPrompt="Job Postion:"+jobPosition+",Job Description:"+jobDesc+",Years of Experience"+experience+",No of Question Count: "+process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_COUNT+",start"
+     const result =await chatSession.sendMessage(InputPrompt)
+     const MockJsonResp=(result.response.text()).replace('```json','').replace('```','')
+
+     console.log(JSON.parse(MockJsonResp));
+     setJsonResponse(MockJsonResp);
+    if(MockJsonResp)
+    {
+
     
-    // Simulate a result (optional)
-    const sampleQuestions = [
-      "What are the core features of React?",
-      "How does the virtual DOM work?",
-      "Can you explain useEffect and its dependencies?",
-    ]
+     const resp=await db.insert(MockInterview)
+     .values({
+      mockId:uuidv4(),
+      jsonMockResp:MockJsonResp,
+      jobPosition:jobPosition,
+      setJobDesc:jobDesc,
+      experience:experience,
+      createdBy:user?.primaryEmailAddress?.emailAddress,
+      createdAt:moment().format('DD-MM-YYYY'),
 
-    setQuestions(sampleQuestions)
-    setOpenDialog(false)
+      
+     }).returning({mockId:MockInterview.mockId})
+     console.log("Inserted ID:",resp)
+     if(resp){
+      setOpenDialog(false);
+      router.push('/dashboard/interview'+resp[0]?.mockId)
+     }
+    }
+    else{
+      console.log("ERROR")
+    }
+     
+     setLoading(false)
+     
+     
   }
-
   return (
     <div>
       <div
@@ -51,11 +100,11 @@ function AddNewInterview() {
 
           <form onSubmit={handleSubmit} className="mt-4 space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1">Job Role / Position</label>
+              <label className="block text-sm font-medium text-gray-300 mb-1">Job Position</label>
               <input
                 type="text"
-                value={jobRole}
-                onChange={(e) => setJobRole(e.target.value)}
+                value={jobPosition}
+                onChange={(e) => setJobPosition(e.target.value)}
                 required
                 placeholder="e.g., Frontend Developer"
                 className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-md text-sm text-white focus:outline-none focus:ring-2 focus:ring-[#3a77b9]"
@@ -96,28 +145,38 @@ function AddNewInterview() {
                 Cancel
               </button>
               <button
-                type="submit"
+                type="submit" disabled={loading}
                 className="px-4 py-2 text-sm bg-[#3a77b9] text-white rounded-md hover:bg-[#3165a0]"
               >
-                Start Interview
+                {loading?
+                <>
+                <LoaderCircle className='animate-spin'/> 'Generating From AI'
+                </>:'Start Interview'
+              }
               </button>
             </div>
           </form>
         </DialogContent>
       </Dialog>
 
-      {questions.length > 0 && (
-        <div className="mt-10 bg-gray-900 p-6 rounded-xl border border-gray-700">
-          <h3 className="text-lg font-semibold text-white mb-4">Generated Interview Questions</h3>
-          <ul className="list-disc ml-6 space-y-2 text-gray-200">
-            {questions.map((q, i) => (
-              <li key={i}>{q}</li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {jsonResponse?.questions?.length > 0 && (
+  <div className="mt-6 bg-gray-900 p-4 rounded-lg text-white border border-gray-700">
+    <h3 className="text-xl font-semibold mb-2">Generated Questions:</h3>
+    <ul className="space-y-4">
+      {jsonResponse.questions.map((qa, index) => (
+        <li key={index}>
+          <p><strong>Q{index + 1}:</strong> {qa.question}</p>
+          <p><strong>A:</strong> {qa.answer}</p>
+        </li>
+      ))}
+    </ul>
+  </div>
+)}
+
     </div>
   )
 }
 
 export default AddNewInterview
+
+
