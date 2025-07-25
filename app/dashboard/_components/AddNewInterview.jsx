@@ -19,8 +19,8 @@ import { useRouter } from 'next/navigation'
 import Router from 'next/router'
 import { db } from '@/utils/db'
 
-import { uuid } from 'drizzle-orm/pg-core'
-import { MockInterview } from '@/utils/schema'
+
+import { mockInterview } from '@/utils/schema'
 
 
 
@@ -30,54 +30,91 @@ function AddNewInterview() {
   const [jobPosition, setJobPosition] = useState('')
   const [jobDesc, setJobDesc] = useState('')
   const [experience, setExperience] = useState('')
-  
-  const route=useRouter
+  const generatedId = uuidv4();
+  const router = useRouter();
   const[loading,setLoading]=useState(false);
   const [jsonResponse, setJsonResponse] = useState([]);
   const {user}=useUser();
   
 
-  const handleSubmit = async(e) => {
-    setLoading(true)
-    e.preventDefault()
-    console.log(jobPosition, jobDesc, experience)
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+  
+    console.log(jobPosition, jobDesc, experience);
+  
+    const InputPrompt = `
+Act like a technical interviewer and generate ${process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_COUNT} interview questions and answers for the following role.
 
-    const InputPrompt="Job Postion:"+jobPosition+",Job Description:"+jobDesc+",Years of Experience"+experience+",No of Question Count: "+process.env.NEXT_PUBLIC_INTERVIEW_QUESTION_COUNT+",start"
-     const result =await chatSession.sendMessage(InputPrompt)
-     const MockJsonResp=(result.response.text()).replace('```json','').replace('```','')
+Return the result **strictly as valid JSON**, with the following format:
 
-     console.log(JSON.parse(MockJsonResp));
-     setJsonResponse(MockJsonResp);
-    if(MockJsonResp)
+{
+  "questions": [
     {
+      "question": "...",
+      "answer": "..."
+    },
+    ...
+  ]
+}
 
-    
-     const resp=await db.insert(MockInterview)
-     .values({
-      mockId:uuidv4(),
-      jsonMockResp:MockJsonResp,
-      jobPosition:jobPosition,
-      setJobDesc:jobDesc,
-      experience:experience,
-      createdBy:user?.primaryEmailAddress?.emailAddress,
-      createdAt:moment().format('DD-MM-YYYY'),
+Details:
+- Job Position: ${jobPosition}
+- Job Description: ${jobDesc}
+- Years of Experience: ${experience}
 
+Respond only with the JSON. No markdown, no explanations, no code blocks.
+`;
+
+  
+    try {
+      const result = await chatSession.sendMessage(InputPrompt);
       
-     }).returning({mockId:MockInterview.mockId})
-     console.log("Inserted ID:",resp)
-     if(resp){
-      setOpenDialog(false);
-      router.push('/dashboard/interview'+resp[0]?.mockId)
-     }
+      // Wait for the response text
+      let rawText = await result.response.text();
+  
+      // Strip code block formatting if present
+      const cleanedText = rawText.replace('```json', '').replace('```', '').trim();
+  
+      // Try to parse JSON
+      let parsedJson;
+      try {
+        parsedJson = JSON.parse(cleanedText);
+      } catch (err) {
+        console.error("Failed to parse response JSON:", cleanedText);
+        throw new Error("AI response was not valid JSON.");
+      }
+  
+      console.log("Parsed JSON:", parsedJson);
+  
+      setJsonResponse(parsedJson);
+  
+      // Insert into DB
+      const resp = await db.insert(mockInterview)
+      .values({
+        mockId: uuidv4(),
+        jsonMockResp: JSON.stringify(parsedJson), // ✅ convert object to string
+        jobPosition: jobPosition,
+        jobDesc: jobDesc,
+        jobExperience: experience, // ✅ match schema
+        createdBy: user?.primaryEmailAddress?.emailAddress,
+        createdAt: moment().format('DD-MM-YYYY'),
+      })
+        .returning({ mockId: mockInterview.mockId });
+  
+      console.log("Inserted ID:", resp);
+  
+      if (resp?.[0]?.mockId) {
+        setOpenDialog(false);
+        router.push('/dashboard/interview/' + resp[0].mockId);
+      }
+    } catch (error) {
+      console.error("Submit failed:", error);
     }
-    else{
-      console.log("ERROR")
-    }
-     
-     setLoading(false)
-     
-     
-  }
+  
+    setLoading(false);
+  };
+  
   return (
     <div>
       <div
